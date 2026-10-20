@@ -1,0 +1,15 @@
+{
+  "name": "hockey-fantasy-calculator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Локальный калькулятор фэнтези КХЛ (sports.ru): свежие данные, прогноз очков, замены, шансы на 1-е место",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "refresh": "node scripts/refresh.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}
