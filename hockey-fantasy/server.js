@@ -31,6 +31,7 @@ function sendFile(res, file, type, name) {
 function paramsFrom(q) {
   const n = (v, d) => (v === undefined || v === '' || v === null ? d : Number(v));
   return {
+    weeklyPlan: true,
     horizon: n(q.horizon, 1),
     risk: n(q.risk, 0),
     maxSwaps: q.maxSwaps === undefined || q.maxSwaps === '' ? null : Number(q.maxSwaps),
@@ -44,11 +45,11 @@ function paramsFrom(q) {
 function seasonParams(snap, q) {
   const weekMs = 7 * 24 * 3600 * 1000;
   const weeksToEnd = Math.max(1, Math.ceil((SEASON_END - Date.now()) / weekMs));
-  return { ...paramsFrom(q), horizon: 4, discount: 1, seasonWeeks: Math.max(0, weeksToEnd - 4), maxSwaps: q.maxSwaps === undefined || q.maxSwaps === '' ? null : Number(q.maxSwaps) };
+  return { ...paramsFrom(q), weeklyPlan: false, horizon: 4, discount: 1, seasonWeeks: Math.max(0, weeksToEnd - 4), maxSwaps: q.maxSwaps === undefined || q.maxSwaps === '' ? null : Number(q.maxSwaps) };
 }
 
 function analyzeCached(snap, params, key) {
-  const k = key + '|' + JSON.stringify(params) + '|' + snap.generatedAt;
+  const k = key + '|' + JSON.stringify(params) + '|' + snap.generatedAt + '|' + Math.floor(Date.now() / 60000);
   if (cache.has(k)) return cache.get(k);
   const a = M.analyze(snap, params);
   cache.set(k, a);

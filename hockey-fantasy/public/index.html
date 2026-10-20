@@ -60,6 +60,33 @@
   .sw b { font-weight:650; }
   .pill-row { display:flex; flex-wrap:wrap; gap:6px; }
   .small { font-size:12px; }
+  #weeklyBest { border-top:4px solid var(--acc); font-size:16px; }
+  #weeklyBest h2 { font-size:22px; }
+  .weekly-head { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:16px; }
+  #btnWeekly { background:var(--acc); color:#fff; min-height:44px; }
+  .weekly-summary { display:flex; flex-wrap:wrap; gap:16px 32px; padding:16px; background:#f1f6fd; border-radius:8px; margin:16px 0; }
+  .weekly-summary strong { display:block; font-size:24px; }
+  .weekly-summary span, .weekly-meta { font-size:14px; color:var(--mut); }
+  .weekly-list { list-style:none; margin:0; padding:0; }
+  .weekly-row { padding:16px 0; border-bottom:1px solid var(--line); display:grid; grid-template-columns:36px 1fr 32px 1fr 180px; gap:12px; align-items:start; }
+  .weekly-number { font-weight:700; color:var(--acc); }
+  .weekly-player { min-width:0; overflow-wrap:anywhere; }
+  .weekly-player small { display:block; color:var(--mut); font-size:14px; margin-top:4px; }
+  .weekly-result { text-align:right; font-size:14px; }
+  .weekly-result strong { display:block; font-size:20px; }
+  #weeklyBest details { font-size:14px; }
+  #weeklyBest summary { padding:12px 0; min-height:44px; }
+  #weeklyFreshness { margin:12px 0; font-size:14px; }
+  #weeklyBest :focus-visible { outline:3px solid var(--acc); outline-offset:3px; }
+  @media (max-width:600px) {
+    #weeklyBest { padding:16px; }
+    .weekly-row { grid-template-columns:24px 1fr; gap:8px 12px; }
+    .weekly-number { grid-row:1 / 5; }
+    .weekly-arrow { display:none; }
+    .weekly-result { grid-column:2; text-align:left; padding-top:4px; }
+    .weekly-summary { gap:12px 24px; }
+    .weekly-head .btn { width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -77,6 +104,7 @@
   </div>
 </header>
 <nav>
+  <a href="#weeklyBest">Лучшие 5 замен</a>
   <a href="#squad">Состав</a>
   <a href="#swaps">Кого на кого</a>
   <a href="#plan">План трансферов</a>
@@ -117,6 +145,20 @@
   <div id="messages"></div>
   <div class="cards" id="cards"></div>
 
+  <section id="weeklyBest" aria-labelledby="weeklyTitle">
+    <div class="weekly-head">
+      <div><h2 id="weeklyTitle">Лучшие 5 замен на эту неделю</h2><div id="weeklyMeta" class="weekly-meta">Загружаем состав и календарь…</div></div>
+      <button type="button" class="btn" id="btnWeekly">Обновить рекомендации</button>
+    </div>
+    <div id="weeklyFreshness" role="status" aria-live="polite"></div>
+    <div id="weeklyContent"></div>
+    <details><summary>Как выбираются замены?</summary>
+      <p>Лучший найденный общий план по модели (beam search), а не пять независимых советов. Цель — ожидаемые очки за остаток текущей недели; настройки горизонта и риска выше на этот блок не влияют. Не больше пяти замен и не больше оставшихся на sports.ru.</p>
+      <p>Проверяются позиции, бюджет и лимит клуба после каждого шага. Соблюдайте порядок: первая замена может освободить бюджет для следующей. При отсутствии улучшения трансферы сохраняются.</p>
+      <p>Прогноз не гарантирует результат: травмы и подтверждённые старты не учитываются; блокировка после начала матча оценена в 150 минут. Замены здесь не выполняются — перед покупкой проверьте доступность на sports.ru.</p>
+    </details>
+  </section>
+
   <section id="squad">
     <h2>Состав и прогноз очков</h2>
     <p class="hint">«Очки/матч» — оценка за матч с учётом выборки (сглаживание к среднему по позиции). «Игр на неделе» — сколько матчей клуба осталось / всего за текущую неделю (неделя с понедельника 04:00 МСК). Прогноз очков = очки за матч × доля игр, в которых игрок выходит, × число матчей.</p>
@@ -131,7 +173,7 @@
 
   <section id="plan">
     <h2>Варианты трансферов: лучший состав при 0…N заменах</h2>
-    <p class="hint">Оптимизатор перебирает последовательности замен (лучи по 200 вариантов), соблюдая все ограничения. Строка «k замен» — лучший состав, для которого нужно не более k замен.</p>
+    <p class="hint">Оптимизатор перебирает последовательности замен (ограниченный beam search), соблюдая все ограничения. Строка «k замен» — лучший состав, для которого нужно не более k замен.</p>
     <div class="tbl"><table id="optionsTable"></table></div>
     <h3 style="margin:16px 0 4px;font-size:14px">Сезонный план (горизонт до конца сезона, приблизительно)</h3>
     <p class="hint" id="seasonNote"></p>
@@ -232,7 +274,7 @@
   const POS = { 1: 'G', 2: 'D', 3: 'F', G: 1, D: 2, F: 3 };
   const posTag = (p) => `<span class="pos p${p}">${p}</span>`;
   const msk = (ms) => (ms == null ? '—' : new Date(ms + 3 * 3600e3).toISOString().slice(5, 16).replace('T', ' ').replace(/-/g, '.'));
-  let state = { week: null, season: null, history: [] };
+  let state = { week: null, season: null, history: [], weeklyRefreshFailed: false, warnings: [] };
   let busy = false;
 
   function params() {
@@ -243,7 +285,7 @@
     return p;
   }
   function setStatus(text, cls) { const s = $('status'); s.textContent = text; s.className = 'status' + (cls ? ' ' + cls : ''); }
-  function setBusy(b) { busy = b; $('btnRecalc').disabled = b; $('btnRecalc2').disabled = b; }
+  function setBusy(b) { busy = b; $('btnRecalc').disabled = b; $('btnRecalc2').disabled = b; $('btnWeekly').disabled = b; $('weeklyBest').setAttribute('aria-busy', String(b)); }
 
   async function getAnalysis() {
     const r = await fetch('/api/analysis?' + params().toString(), { cache: 'no-store' });
@@ -262,6 +304,8 @@
       apply(j);
       setStatus(`Обновлено с sports.ru: ${new Date(j.snapshotAt).toLocaleString('ru-RU')} · расчёт ${j.ms ? Math.round(j.ms / 100) / 10 + ' с' : ''}`, '');
     } catch (e) {
+      state.weeklyRefreshFailed = true;
+      renderWeeklyPlan();
       setStatus('Ошибка: ' + e.message, 'err');
       showMsg('errbox', 'Не удалось обновить данные: ' + e.message + '. Проверьте доступ к sports.ru и нажмите «Пересчитать» ещё раз.');
     } finally { setBusy(false); }
@@ -269,6 +313,7 @@
   function showMsg(cls, text) { $('messages').innerHTML = text ? `<div class="${cls}">${esc(text)}</div>` : ''; }
 
   function apply(j) {
+    state.weeklyRefreshFailed = false; state.warnings = j.warnings || [];
     state.week = j.week; state.season = j.season; state.history = j.history || [];
     state.seasonMu = new Map(((j.season && j.season.pool) || []).map((p) => [p.id, p.muH]));
     const w = j.week;
@@ -276,6 +321,7 @@
     if (j.warnings && j.warnings.length) showMsg('warnbox', 'Предупреждения источников: ' + j.warnings.join(' · '));
     $('teamLine').textContent = `${w.team.name} · команда sports.ru ${w.team.teamId} · турнир КХЛ (107) · неделя ${w.week.current} (до ${w.week.deadline || '—'} МСК)`;
     $('leagueName').textContent = (w.league && w.league.leagueName) || 'лига';
+    renderWeeklyPlan();
     renderCards(w, state.season);
     renderSquad(w);
     renderSingles(w);
@@ -285,6 +331,38 @@
     renderPool(w);
     renderSchedule(w);
     renderHistory(state.history);
+  }
+
+  function renderWeeklyPlan() {
+    const p = state.week && state.week.weeklyPlan;
+    if (!p) {
+      $('weeklyContent').textContent = 'Рекомендации появятся после загрузки данных.';
+      if (state.weeklyRefreshFailed) $('weeklyFreshness').textContent = 'Обновление не удалось. Нажмите «Обновить рекомендации».';
+      return;
+    }
+    const dateMsk = (value) => new Date(value).toLocaleString('ru-RU', { timeZone:'Europe/Moscow', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    const now = Date.now(), end = Date.parse(p.week.end);
+    const left = Math.max(0, end - now);
+    const hours = Math.floor(left / 3600000), minutes = Math.floor(left / 60000) % 60;
+    $('weeklyMeta').textContent = `Неделя ${p.week.current} · ${dateMsk(p.week.start)} — ${dateMsk(p.week.end)} МСК · До конца: ${hours} ч ${minutes} мин · Данные: ${dateMsk(p.generatedAt)} МСК`;
+    const expired = now >= end || p.swaps.some((s) => now >= Date.parse(s.executeBefore));
+    const stale = now - Date.parse(p.generatedAt) > 15 * 60000;
+    const unavailable = !p.valid || expired || stale || state.weeklyRefreshFailed;
+    const notices = [];
+    if (state.weeklyRefreshFailed) notices.push('Обновление не удалось. Старый план не считается актуальным.');
+    if (expired) notices.push('Неделя сменилась или наступила блокировка игрока. Пересчитайте план.');
+    if (stale) notices.push('Данным больше 15 минут. Обновите рекомендации перед заменами.');
+    if (!p.valid) notices.push(p.reason);
+    if (state.warnings.length) notices.push('Предупреждения источников: ' + state.warnings.join(' · '));
+    $('weeklyFreshness').className = notices.length ? 'warnbox' : 'free';
+    $('weeklyFreshness').textContent = notices.length ? notices.join(' ') : 'План проверен по загруженному снимку. Перед выполнением проверьте sports.ru.';
+    if (unavailable) {
+      $('weeklyContent').textContent = 'Актуальные замены недоступны. Нажмите «Обновить рекомендации».';
+      return;
+    }
+    const player = (a, label) => `<div class="weekly-player"><span class="weekly-meta">${label}</span><br>${posTag(a.pos)} <b>${esc(a.name)}</b><small>${esc(a.club)} · цена ${fmt0(a.price)}</small><small>Матчей осталось: ${a.weekGamesLeft} · прогноз: ${fmt1(a.mu1)} очк.</small></div>`;
+    const rows = p.swaps.map((s) => `<li class="weekly-row"><div class="weekly-number">${s.order}.</div>${player(s.out, 'Продать')}<span class="weekly-arrow" aria-hidden="true">→</span>${player(s.in, 'Купить')}<div class="weekly-result"><strong class="${s.gain >= 0 ? 'up' : 'down'}">${sgn(s.gain)} очк.</strong>До ${esc(dateMsk(s.executeBefore))} МСК<br>Баланс после шага: ${fmt0(s.budgetLeft)}<details><summary>Почему эта замена?</summary>${s.reasons.map(esc).join('. ')}.</details></div></li>`).join('');
+    $('weeklyContent').innerHTML = `<div class="weekly-summary"><div><span>Без замен → с заменами</span><strong>${fmt1(p.baseline)} → ${fmt1(p.expected)}</strong></div><div><span>Ожидаемый прирост</span><strong class="up">${sgn(p.gain)} очк.</strong></div><div><span>Замен в плане / доступно</span><strong>${p.transfers} / ${p.maxSwaps}</strong></div><div><span>Остаток бюджета</span><strong>${fmt0(p.budgetLeft)}</strong></div></div><ol class="weekly-list">${rows}</ol><p>${esc(p.reason)}</p>`;
   }
 
   function renderCards(w, sAn) {
@@ -351,7 +429,7 @@
     const head = `<tr><th>Вариант</th><th>Замены (уходит → приходит)</th><th class="n">Ожид. очки (нед.)</th><th class="n">Прирост за неделю</th><th class="n">Стоимость состава</th><th class="n">Остаток бюджета</th></tr>`;
     const body = opts.map((o) => {
       const sw = o.swaps.length ? o.swaps.map((s) => `${esc(s.out.name)} <span class="muted">(${esc(s.out.club)})</span> → <b>${esc(s.in.name)}</b> <span class="muted">(${esc(s.in.club)}, ${s.in.price}, ${fmt1(s.in.mu1)})</span>`).join('<br>') : '<span class="muted">без замен</span>';
-      return `<tr><td><b>${o.transfers === 0 ? 'текущий' : o.transfers + ' замен(ы)'}</b></td><td class="sw">${sw}</td><td class="n">${fmt1(w.team.expectedThisWeek + (o.gainThisWeek || 0))}</td><td class="n up">${sgn(o.gainThisWeek)}</td><td class="n">${fmt0(o.cost)}</td><td class="n">${fmt0(o.budgetLeft)}</td></tr>`;
+      return `<tr><td><b>${o.transfers === 0 ? 'текущий' : 'до ' + o.transferLimit + ' замен · фактически ' + o.transfers}</b></td><td class="sw">${sw}</td><td class="n">${fmt1(w.team.expectedThisWeek + (o.gainThisWeek || 0))}</td><td class="n up">${sgn(o.gainThisWeek)}</td><td class="n">${fmt0(o.cost)}</td><td class="n">${fmt0(o.budgetLeft)}</td></tr>`;
     }).join('');
     return head + body;
   }
@@ -364,7 +442,7 @@
       const base = s.options[0] ? s.options[0].value : 0;
       const body = s.options.map((o) => {
         const sw = o.swaps.length ? o.swaps.map((x) => `${esc(x.out.name)} → <b>${esc(x.in.name)}</b> <span class="muted">(${esc(x.in.club)})</span>`).join('<br>') : '<span class="muted">без замен</span>';
-        return `<tr><td><b>${o.transfers === 0 ? 'текущий' : o.transfers + ' замен(ы)'}</b></td><td class="sw">${sw}</td><td class="n">${fmt0(o.value)}</td><td class="n up">${sgn(o.value - base, 0)}</td><td class="n">${fmt0(o.cost)}</td><td class="n">${fmt0(o.budgetLeft)}</td></tr>`;
+        return `<tr><td><b>${o.transfers === 0 ? 'текущий' : 'до ' + o.transferLimit + ' замен · фактически ' + o.transfers}</b></td><td class="sw">${sw}</td><td class="n">${fmt0(o.value)}</td><td class="n up">${sgn(o.value - base, 0)}</td><td class="n">${fmt0(o.cost)}</td><td class="n">${fmt0(o.budgetLeft)}</td></tr>`;
       }).join('');
       $('seasonOptionsTable').innerHTML = head + body;
     } else {
@@ -449,6 +527,8 @@
     await recalc('Загружаю свежие данные с sports.ru…');
   }
 
+  $('btnWeekly').addEventListener('click', () => recalc());
+  setInterval(renderWeeklyPlan, 30000);
   $('btnRecalc').addEventListener('click', () => recalc());
   $('btnRecalc2').addEventListener('click', () => recalc());
   ['horizon', 'risk', 'maxSwaps'].forEach((id) => $(id).addEventListener('change', () => recalc('Пересчитываю с новыми параметрами (данные обновляются с sports.ru)…')));

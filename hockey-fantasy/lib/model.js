@@ -9,6 +9,8 @@
 //  * a transfer sells a player at his CURRENT price, so a swap is value-neutral;
 //    what counts is the price growth (points) of the players you hold.
 
+const { buildWeeklyPlan } = require('./weekly-plan');
+
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 const MIN_MS = 60 * 1000;
 const WEEK_ANCHOR = Date.UTC(2026, 8, 7, 1, 0);       // Mon 7 Sep 2026 04:00 MSK (= 01:00 UTC)
@@ -210,7 +212,8 @@ function analyze(snap, userOpts = {}) {
   // optimiser: best squad for each number of transfers (<= maxSwaps)
   const levels = beamOptimise({ squad, cands, budget, maxSwaps, clubLimit: o.clubLimit, width: o.beamWidth });
   const options = levels.map((lv, k) => ({
-    transfers: k,
+    transferLimit: k,
+    transfers: lv.swaps.length,
     value: +lv.value.toFixed(2),
     gain: +(lv.value - currentScore).toFixed(2),
     gainThisWeek: +(squadSum(lv.ids.map((id) => byId.get(id)), (p) => p.mu1) - squadSum(squad, (p) => p.mu1)).toFixed(2),
@@ -245,6 +248,9 @@ function analyze(snap, userOpts = {}) {
     },
     squad: squad.map((p) => ({ ...p })),
     squadMissing,
+    weeklyPlan: o.weeklyPlan ? buildWeeklyPlan({ players, squad, squadMissing, meta, budget, now,
+      week: { current: currentWeek + 1, start: new Date(wk[0]).toISOString(), end: new Date(wk[1]).toISOString() },
+      generatedAt: snap.generatedAt, optimise: beamOptimise, prune: pruneCands, width: o.beamWidth }) : undefined,
     options,
     singles,
     ideal: ideal ? { value: +ideal.value.toFixed(2), cost: ideal.cost, transfersNeeded: squadIds.filter((id) => !ideal.ids.includes(id)).length, ids: ideal.ids, players: ideal.ids.map((id) => brief(byId.get(id))) } : null,
@@ -473,7 +479,7 @@ function leagueAnalysis({ snap, byId, players, squadIds, squad, options, ideal, 
   }
   const seen = new Set();
   const cands = cand.filter((c) => { const k = [...c.ids].sort().join(','); if (seen.has(k)) return false; seen.add(k); return true; });
-  for (const c of cands) c.swapsBrief = c.swaps.map((s) => ({ out: brief(byId.get(s.out || s.out)), in: brief(byId.get(s.in || s.in)) }));
+  for (const c of cands) c.swapsBrief = c.swaps.map((s) => ({ out: brief(byId.get(typeof s.out === 'object' ? s.out.id : s.out)), in: brief(byId.get(typeof s.in === 'object' ? s.in.id : s.in)) }));
 
   // distribution index
   const index = new Map(); const mu = []; const sd = [];
