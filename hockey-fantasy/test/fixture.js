@@ -12,6 +12,7 @@ function fixture() {
     schedule.push({ home: club, away: `Соперник ${id}`, start: Date.parse('2026-10-28T16:00:00Z') });
   }
   return { generatedAt: new Date(NOW).toISOString(), pool, roster: pool.slice(0, 17).map((p) => ({ id: p.id })), stats: { byTag }, standings, schedule,
+    injuries: { lastSuccessAt: new Date(NOW).toISOString(), checkedAt: new Date(NOW).toISOString(), byId: {} },
     meta: { teamId: '587717', teamName: 'Тестовая команда', cost: 1700, balance: 50, transfersLeft: 5, clubLimit: 3, week: 7, leagues: [] }, warnings: [] };
 }
 module.exports = { fixture, NOW };

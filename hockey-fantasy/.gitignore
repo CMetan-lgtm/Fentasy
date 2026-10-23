@@ -1,0 +1,3 @@
+# Runtime news cache; injury status is also kept in snapshot.json.
+data/injuries-cache.json
+data/injuries-cache.json.tmp

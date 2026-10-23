@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const S = require('./sportsru');
 const M = require('./model');
+const { fetchInjuries } = require('./injuries');
 
 const TEAM_ID = String(process.env.TEAM_ID || '587717');
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -41,6 +42,19 @@ async function refreshSnapshot({ withFanRosters = false } = {}) {
     tryIt('leagueFan', () => S.fetchLeagueTable(fanId)),
   ]);
 
+  let injuries;
+  try {
+    injuries = await fetchInjuries({ pool, stats: stats ? { byTag: Object.fromEntries(stats.byTag) } : {}, cacheFile: path.join(DATA_DIR, 'injuries-cache.json'), previousData: (loadSnapshot() || {}).injuries });
+    sources.injuries = injuries.error ? 'error: ' + injuries.error : 'ok (новости, не полный реестр)';
+    if (injuries.error) warnings.push('Травмы: ' + injuries.error);
+  } catch (e) {
+    sources.injuries = 'error: ' + e.message;
+    warnings.push('Травмы: ' + e.message);
+    // A storage/network failure must never erase known injured players.
+    injuries = (loadSnapshot() || {}).injuries || null;
+    if (injuries) injuries = { ...injuries, error: e.message };
+  }
+
   const privRosters = {};
   if (privTable) {
     await mapLimit(privTable.rows.filter((r) => r.teamId !== TEAM_ID), 6, async (r) => {
@@ -66,6 +80,7 @@ async function refreshSnapshot({ withFanRosters = false } = {}) {
     meta,
     roster,
     pool,
+    injuries,
     schedule: schedule || [],
     standings: standings || {},
     stats: stats ? { byTag: Object.fromEntries(stats.byTag), players: stats.players } : { byTag: {}, players: 0 },
@@ -99,13 +114,15 @@ function writeExports(snap, analysis) {
     { h: 'Матчей сыграно', v: 'gp' }, { h: 'Очков за матч (оценка)', v: 'fppg' },
     { h: 'Игр клуба на неделе', v: 'weekGames' }, { h: 'Осталось игр на неделе', v: 'weekGamesLeft' },
     { h: 'Ожидаемые очки на неделю', v: 'mu1' }, { h: 'Ожидаемые очки за горизонт', v: 'muH' },
+    { h: 'Статус травмы', v: 'injuryStatus' }, { h: 'Источник травмы', v: 'injurySource' }, { h: 'Дата сообщения', v: 'injuryUpdatedAt' },
+    { h: 'Причины исключения из покупок', v: (p) => p.exclusionReasons.join(' | ') },
     { h: 'Блокировка сейчас', v: 'lockTxt' }, { h: 'Следующая игра клуба (МСК)', v: 'nextMsk' }, { h: 'ID игрока', v: 'id' },
   ];
   fs.writeFileSync(path.join(DATA_DIR, 'squad_points.csv'), M.toCsv(squadRows, squadCols));
   fs.writeFileSync(path.join(DATA_DIR, 'squad_points.json'), JSON.stringify({
     exportedAt: new Date().toISOString(), snapshotAt: snap.generatedAt,
     team: analysis.team, week: analysis.week,
-    squad: analysis.squad.map((p) => ({ id: p.id, name: p.name, pos: p.posShort, club: p.club, price: p.price, startValue: p.startValue, seasonPoints: p.seasonPoints, gp: p.gp, fppgEstimate: p.fppg, weekGames: p.weekGames, weekGamesLeft: p.weekGamesLeft, expectedThisWeek: p.mu1, expectedHorizon: p.muH, locked: p.locked, nextStart: p.nextStart ? new Date(p.nextStart).toISOString() : null })),
+    squad: analysis.squad.map((p) => ({ id: p.id, name: p.name, pos: p.posShort, club: p.club, price: p.price, startValue: p.startValue, seasonPoints: p.seasonPoints, gp: p.gp, fppgEstimate: p.fppg, weekGames: p.weekGames, weekGamesLeft: p.weekGamesLeft, expectedThisWeek: p.mu1, expectedHorizon: p.muH, locked: p.locked, injuryStatus: p.injuryStatus, injurySource: p.injurySource, injuryUpdatedAt: p.injuryUpdatedAt, rotationRisk: p.rotationRisk, canBuy: p.canBuy, exclusionReasons: p.exclusionReasons, nextStart: p.nextStart ? new Date(p.nextStart).toISOString() : null })),
   }, null, 2));
   const poolCols = [
     { h: 'ID', v: 'id' }, { h: 'Игрок', v: 'name' }, { h: 'Позиция', v: 'posShort' }, { h: 'Клуб', v: 'club' },
@@ -114,6 +131,8 @@ function writeExports(snap, analysis) {
     { h: 'Игр на неделе', v: 'weekGames' }, { h: 'Осталось на неделе', v: 'weekGamesLeft' },
     { h: 'Ожидаемые очки на неделю', v: 'mu1' }, { h: 'Ожидаемые очки за горизонт', v: 'muH' }, { h: 'Разброс (сигма)', v: 'sigmaH' },
     { h: 'В моём составе', v: (p) => (analysis.squad.some((s) => s.id === p.id) ? 'да' : 'нет') },
+    { h: 'Статус травмы', v: 'injuryStatus' }, { h: 'Источник травмы', v: 'injurySource' }, { h: 'Дата сообщения', v: 'injuryUpdatedAt' },
+    { h: 'Можно покупать', v: (p) => p.canBuy ? 'да' : 'нет' }, { h: 'Причины исключения', v: (p) => p.exclusionReasons.join(' | ') },
     { h: 'Блокировка', v: (p) => (p.locked ? 'да' : 'нет') },
   ];
   fs.writeFileSync(path.join(DATA_DIR, 'pool_players.csv'), M.toCsv(analysis.pool, poolCols));

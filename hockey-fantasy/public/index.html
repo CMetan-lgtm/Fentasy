@@ -106,6 +106,7 @@
 <nav>
   <a href="#weeklyBest">Лучшие 5 замен</a>
   <a href="#squad">Состав</a>
+  <a href="#health">Травмы и ротация</a>
   <a href="#swaps">Кого на кого</a>
   <a href="#plan">План трансферов</a>
   <a href="#league">Лига и 1-е место</a>
@@ -155,8 +156,15 @@
     <details><summary>Как выбираются замены?</summary>
       <p>Лучший найденный общий план по модели (beam search), а не пять независимых советов. Цель — ожидаемые очки за остаток текущей недели; настройки горизонта и риска выше на этот блок не влияют. Не больше пяти замен и не больше оставшихся на sports.ru.</p>
       <p>Проверяются позиции, бюджет и лимит клуба после каждого шага. Соблюдайте порядок: первая замена может освободить бюджет для следующей. При отсутствии улучшения трансферы сохраняются.</p>
-      <p>Прогноз не гарантирует результат: травмы и подтверждённые старты не учитываются; блокировка после начала матча оценена в 150 минут. Замены здесь не выполняются — перед покупкой проверьте доступность на sports.ru.</p>
+      <p>Прогноз не гарантирует результат: известные травмы и риск ротации исключаются из покупок, но полнота новостей и подтверждённые старты не гарантируются; блокировка после начала матча оценена в 150 минут. Замены здесь не выполняются — перед покупкой проверьте доступность на sports.ru.</p>
     </details>
+  </section>
+
+  <section id="health" aria-labelledby="healthTitle">
+    <h2 id="healthTitle">Травмы и риск ротации</h2>
+    <div id="healthSummary" role="status" aria-live="polite"></div>
+    <p class="hint">Травмы и возвращения загружаются из новостей Sports.ru автоматически, с кэшем на 15 минут. Это не полный медицинский реестр: отсутствие новости не подтверждает здоровье. Травмированные и игроки с сомнительным участием не покупаются. Риск ротации — доля матчей сезона ниже 75% (для вратарей 60%) при минимум 5 матчах клуба, либо среднее время ниже 10 минут (для вратарей 30 минут). Это эвристика, а не подтверждение будущего состава.</p>
+    <div class="tbl"><table id="healthTable"></table></div>
   </section>
 
   <section id="squad">
@@ -253,7 +261,7 @@
       <li><b>Разброс</b>: очки за игру случайны (голы, передачи, сухарь и т.д.) + неопределённость самой оценки очков за матч. Для вероятностей это важно: при отставании выгоднее разброс, при лидерстве — стабильность (см. «Риск»).</li>
       <li><b>Сезонный прогноз</b> использует среднее число матчей клуба в неделю (≈2.3) и продолжается до 23 мая 2027 — это приближение, не расписание.</li>
       <li><b>Трансферы:</b> предполагается 1 трансфер = 1 замена игрока; бюджет = стоимость + баланс; клуб не более 3 игроков; игрок блокируется за 30 минут до игры своего клуба.</li>
-      <li><b>Не учитывается:</b> травмы и новости, изменения составов соперников, ротация вратарей сверх среднего, ограничения, которых нет в правилах сайта.</li>
+      <li><b>Ограничения:</b> травмы учитываются по доступным новостям, не по полному реестру. Ротация оценивается по сезонному участию и среднему игровому времени; последние заявки и старты не подтверждены. Составы соперников считаются неизменными.</li>
     </ul>
     <p class="small">Подробный план и варианты — в файле <code>PLAN.md</code>. Инструкция запуска — в <code>README.md</code>.</p>
   </section>
@@ -323,6 +331,7 @@
     $('leagueName').textContent = (w.league && w.league.leagueName) || 'лига';
     renderWeeklyPlan();
     renderCards(w, state.season);
+    renderHealth(w);
     renderSquad(w);
     renderSingles(w);
     renderOptions(w, state.season);
@@ -353,6 +362,7 @@
     if (expired) notices.push('Неделя сменилась или наступила блокировка игрока. Пересчитайте план.');
     if (stale) notices.push('Данным больше 15 минут. Обновите рекомендации перед заменами.');
     if (!p.valid) notices.push(p.reason);
+    if (p.health) notices.push('Проверка травм: ' + (p.health.lastSuccessAt ? dateMsk(p.health.lastSuccessAt) + ' МСК. ' : 'нет успешной загрузки. ') + p.health.warning);
     if (state.warnings.length) notices.push('Предупреждения источников: ' + state.warnings.join(' · '));
     $('weeklyFreshness').className = notices.length ? 'warnbox' : 'free';
     $('weeklyFreshness').textContent = notices.length ? notices.join(' ') : 'План проверен по загруженному снимку. Перед выполнением проверьте sports.ru.';
@@ -381,6 +391,21 @@
     $('cards').innerHTML = cards.map(([k, v, s]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
   }
 
+  function healthStatus(p) {
+    const label = p.injuryStatus === 'injured' ? 'Травма: возвращение не подтверждено' : p.injuryStatus === 'doubtful' ? 'Участие под вопросом' : p.injuryStatus === 'available' ? 'Есть сообщение о возвращении' : 'Нет известного сообщения о травме';
+    const source = p.injurySource && /^https:\/\/www\.sports\.ru\/hockey\//.test(p.injurySource) ? ` <a href="${esc(p.injurySource)}" target="_blank" rel="noopener noreferrer">Источник</a>` : '';
+    return `<span class="${p.canBuy ? 'free' : 'lock'}">${esc(label)}</span>${source}${p.exclusionReasons && p.exclusionReasons.length ? '<br><small>' + p.exclusionReasons.map(esc).join('; ') + '</small>' : ''}`;
+  }
+
+  function renderHealth(w) {
+    const h = w.health;
+    if (!h) { $('healthSummary').textContent = 'Проверка травм отсутствует. Обновите рекомендации.'; $('healthTable').innerHTML = ''; return; }
+    $('healthSummary').className = h.blocked || h.error ? 'warnbox' : 'hint';
+    $('healthSummary').textContent = `Последняя успешная проверка: ${h.lastSuccessAt ? msk(Date.parse(h.lastSuccessAt)) + ' МСК' : 'нет'}. Известных травм: ${h.injured}; под вопросом: ${h.doubtful}; риск ротации/малое время: ${h.rotation}. ` + (h.blocked ? 'Покупки заблокированы до успешного обновления. ' : '') + (h.error || '') + ' ' + h.warning;
+    const rows = w.pool.filter((p) => ['injured', 'doubtful'].includes(p.injuryStatus) || p.rotationRisk || p.lowIceTime).sort((a,b) => a.club.localeCompare(b.club, 'ru') || a.name.localeCompare(b.name, 'ru'));
+    $('healthTable').innerHTML = '<tr><th>Игрок</th><th>Клуб</th><th>Участие в матчах</th><th>Статус и причина исключения</th><th>Дата сообщения (МСК)</th></tr>' + rows.map((p) => `<tr><td>${esc(p.name)}</td><td>${esc(p.club)}</td><td>${p.participation == null ? '—' : Math.round(p.participation * 100) + '%'}</td><td>${healthStatus(p)}</td><td>${p.injuryUpdatedAt ? msk(Date.parse(p.injuryUpdatedAt)) : '—'}</td></tr>`).join('');
+  }
+
   function renderSquad(w) {
     const rows = [...w.squad].sort((a, b) => a.pos - b.pos || b.mu1 - a.mu1);
     const maxMu = Math.max(1, ...rows.map((p) => p.mu1));
@@ -399,7 +424,7 @@
       <td class="n">${fmt1(p.sigma1)}</td>
       <td class="n">${fmt1(state.seasonMu.get(p.id))}</td>
       <td>${msk(p.nextStart)}</td>
-      <td>${p.locked ? '<span class="lock">заблокирован</span>' : '<span class="free">свободен</span>'}</td>
+      <td>${healthStatus(p)}<br>${p.locked ? '<span class="lock">заблокирован</span>' : '<span class="free">нет блокировки</span>'}</td>
     </tr>`).join('');
     const sum = rows.reduce((s, p) => s + p.mu1, 0);
     const seasonSum = rows.reduce((s, p) => s + (state.seasonMu.get(p.id) || 0), 0);
@@ -503,7 +528,7 @@
       <td>${posTag(p.posShort)}</td><td><b>${esc(p.name)}</b> ${inSquad.has(p.id) ? '<span class="tag">в составе</span>' : ''}</td><td>${esc(p.club)}</td>
       <td class="n">${fmt0(p.price)}</td><td class="n">${fmt0(p.seasonPoints)}</td><td class="n">${p.gp}</td><td class="n">${fmt1(p.fppg)}</td>
       <td class="n">${p.weekGamesLeft} / ${p.weekGames}</td><td class="n"><b>${fmt1(p.mu1)}</b></td><td class="n">${fmt1(sm(p))}</td>
-      <td class="n">${fmt1(sm(p) / (p.price / 1000))}</td><td>${p.locked ? '<span class="lock">заблокирован</span>' : '<span class="free">свободен</span>'}</td></tr>`).join('');
+      <td class="n">${fmt1(sm(p) / (p.price / 1000))}</td><td>${healthStatus(p)}<br>${p.locked ? '<span class="lock">заблокирован</span>' : '<span class="free">нет блокировки</span>'}</td></tr>`).join('');
   }
 
   function renderSchedule(w) {

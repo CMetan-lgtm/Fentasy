@@ -31,6 +31,7 @@ function validatePlan({ squad, swaps, budget, clubLimit, maxSwaps }) {
     const out = current.get(s.out.id), inn = s.in;
     if (!out || sold.has(s.out.id) || bought.has(inn.id) || original.has(inn.id) || current.has(inn.id)) { errors.push('Повтор или недоступный игрок в плане.'); break; }
     if (out.locked || inn.locked) errors.push('Игрок заблокирован.');
+    if (inn.canBuy === false) errors.push('Покупка исключена: травма, риск ротации или неполные данные.');
     if (out.pos !== inn.pos) errors.push('Позиции замены не совпадают.');
     if (!Number.isFinite(inn.price) || inn.price <= 0) errors.push('Неизвестная цена покупки.');
     current.delete(out.id); current.set(inn.id, inn);
@@ -40,7 +41,7 @@ function validatePlan({ squad, swaps, budget, clubLimit, maxSwaps }) {
   return { ok: !errors.length, errors: [...new Set(errors)], cost, balances, ids: [...current.keys()] };
 }
 
-function buildWeeklyPlan({ players, squad, squadMissing, meta, budget, now, week, generatedAt, optimise, prune, width = 300 }) {
+function buildWeeklyPlan({ players, squad, squadMissing, meta, budget, now, week, generatedAt, health, optimise, prune, width = 300 }) {
   const maxSwaps = transferLimit(meta.transfersLeft);
   const clubLimit = Number(meta.clubLimit) > 0 ? Math.min(3, Math.floor(Number(meta.clubLimit))) : 3;
   const baseline = round(squad.reduce((sum, p) => sum + p.mu1, 0));
@@ -48,16 +49,17 @@ function buildWeeklyPlan({ players, squad, squadMissing, meta, budget, now, week
   const base = { week, generatedAt, computedAt: new Date(now).toISOString(), maxSwaps, clubLimit,
     transfers: 0, baseline, expected: baseline, gain: 0, budgetLeft: meta.balance, swaps: [],
     valid: true, reason: '', method: 'Лучший найденный план по модели (beam search)',
-    assumptions: 'Без данных о травмах и подтверждённых стартах. Блокировка после начала матча оценена в 150 минут.' };
+    health, assumptions: 'Известные травмы и сомнительные участия исключены; ротация оценивается по доле матчей сезона и среднему времени на льду. Новости не являются полным медицинским реестром. Подтверждённые старты неизвестны. Блокировка после начала матча оценена в 150 минут.' };
   const initial = validatePlan({ squad, swaps: [], budget, clubLimit, maxSwaps });
   if (squadMissing.length || !initial.ok || !Number.isFinite(snapshotMs) || snapshotMs < Date.parse(week.start) || snapshotMs > now + 60000) {
     return { ...base, valid: false, reason: 'Неполные или устаревшие данные. Обновите состав, цены и расписание с sports.ru.' };
   }
+  if (!health || health.blocked) return { ...base, valid: false, reason: 'Нет актуальной проверки травм. Обновите рекомендации; старые статусы травм сохранены.' };
   if (!maxSwaps) return { ...base, reason: 'На текущую неделю трансферов не осталось.' };
   // mu1 does not depend on the global horizon, season extension or risk setting.
   const sq = squad.map((p) => ({ ...p, score: p.mu1 }));
   const owned = new Set(sq.map((p) => p.id));
-  const cands = prune(players.filter((p) => !owned.has(p.id) && !p.locked && p.price > 0 && Number.isFinite(p.mu1)).map((p) => ({ ...p, score: p.mu1 })));
+  const cands = prune(players.filter((p) => p.canBuy && !owned.has(p.id) && !p.locked && p.price > 0 && Number.isFinite(p.mu1)).map((p) => ({ ...p, score: p.mu1 })));
   const levels = optimise({ squad: sq, cands, budget, maxSwaps, clubLimit, width });
   const best = levels[levels.length - 1];
   const byId = new Map(players.map((p) => [p.id, p]));
@@ -66,11 +68,15 @@ function buildWeeklyPlan({ players, squad, squadMissing, meta, budget, now, week
   if (!checked.ok) return { ...base, valid: false, reason: 'План не прошёл проверку ограничений. Обновите данные.', errors: checked.errors };
   if (!swaps.length || best.value <= baseline + 0.005) return { ...base, reason: 'Полезных доступных замен не найдено. Сохраните трансферы.' };
   const compact = (p) => ({ id: p.id, name: p.name, club: p.club, pos: p.posShort, price: p.price,
-    mu1: p.mu1, fppg: p.fppg, availability: p.availability, weekGamesLeft: p.weekGamesLeft });
+    mu1: p.mu1, fppg: p.fppg, availability: p.availability, weekGamesLeft: p.weekGamesLeft,
+    injuryStatus: p.injuryStatus, injurySource: p.injurySource, injuryUpdatedAt: p.injuryUpdatedAt,
+    participation: p.participation, rotationRisk: p.rotationRisk, canBuy: p.canBuy, exclusionReasons: p.exclusionReasons });
   const rows = swaps.map((s, i) => {
     const starts = [s.out.nextStart, s.in.nextStart].filter((t) => Number.isFinite(t));
     const executeBefore = Math.min(Date.parse(week.end), ...starts.map((t) => t - 30 * 60000));
-    const reasons = [];
+    const reasons = ['Нет известного запрета по новостям; порог участия и игрового времени пройден'];
+    if (['injured', 'doubtful'].includes(s.out.injuryStatus)) reasons.push('У продаваемого игрока есть сообщение о травме или сомнительном участии');
+    if (s.out.rotationRisk || s.out.lowIceTime) reasons.push('У продаваемого игрока повышенный риск ротации');
     if (s.in.weekGamesLeft > s.out.weekGamesLeft) reasons.push('Больше оставшихся матчей');
     if (s.in.fppg > s.out.fppg) reasons.push('Выше прогноз очков за матч');
     if (s.in.availability > s.out.availability) reasons.push('Выше расчётная доля участия');

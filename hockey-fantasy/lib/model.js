@@ -10,6 +10,7 @@
 //    what counts is the price growth (points) of the players you hold.
 
 const { buildWeeklyPlan } = require('./weekly-plan');
+const { injurySummary } = require('./injuries');
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 const MIN_MS = 60 * 1000;
@@ -33,6 +34,9 @@ const DEFAULTS = {
   mcIters: 4000,
   seed: 20261008,
   beamWidth: 300,
+  minParticipation: 0.75, // skaters: season appearances / club matches
+  minGoalieParticipation: 0.60,
+  minRotationSample: 5,
 };
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
@@ -89,6 +93,7 @@ function analyze(snap, userOpts = {}) {
   const o = { ...DEFAULTS, ...userOpts };
   const now = Number(o.now || Date.now());
   const meta = snap.meta;
+  const health = injurySummary(snap.injuries, now);
   const budget = meta.cost + meta.balance;                 // league value (ОС); swaps keep it constant
   const maxSwaps = o.maxSwaps != null ? Number(o.maxSwaps) : (meta.transfersLeft || 0);
   const H = clamp(Math.round(Number(o.horizon)), 1, 4);
@@ -149,7 +154,20 @@ function analyze(snap, userOpts = {}) {
     const tp = teamGames(p.club);
     const pr = prior[p.amplua];
     const fppg = (p.delta + K * pr.fppg) / (gp + K);               // fantasy points per game played
-    const avail = clamp((gp + 1) / (tp + 1.5), 0.1, 1.0);           // share of club games he plays
+    const injury = health.byId[String(p.id)] || null;
+    const unavailable = !!injury && ['injured', 'doubtful'].includes(injury.status);
+    const participation = tp > 0 ? clamp(gp / tp, 0, 1) : null;
+    const minShare = p.amplua === 1 ? o.minGoalieParticipation : o.minParticipation;
+    const rotationRisk = tp >= o.minRotationSample && participation < minShare;
+    const lowIceTime = !!st && st.toiPg > 0 && st.toiPg < (p.amplua === 1 ? 30 : 10);
+    const exclusionReasons = [];
+    if (health.blocked) exclusionReasons.push('Нет актуальной проверки новостей о травмах');
+    if (unavailable) exclusionReasons.push(injury.status === 'injured' ? 'Сообщение о травме; возвращение не подтверждено' : 'Участие под вопросом');
+    if (!st || !gp || tp <= 0) exclusionReasons.push('Недостаточно статистики участия');
+    if (rotationRisk) exclusionReasons.push(`Риск ротации: участие в ${Math.round(participation * 100)}% матчей клуба`);
+    if (lowIceTime) exclusionReasons.push('Мало среднего игрового времени');
+    const canBuy = exclusionReasons.length === 0;
+    const avail = unavailable ? 0 : clamp((gp + 1) / (tp + 1.5), 0.1, 1.0);           // share of club games he plays
     let sigma2Game;
     if (p.amplua === 1) {
       const sv = ((st ? st.saves : 0) + K * pr.sv) / (gp + K);
@@ -188,6 +206,9 @@ function analyze(snap, userOpts = {}) {
       id: p.id, name: p.name, club: p.club, clubId: p.clubId, pos: p.amplua, posShort: POS_SHORT[p.amplua],
       price: p.price, startValue: p.startValue, seasonPoints: p.delta, gp, teamGames: tp,
       fppg: +fppg.toFixed(2), availability: +avail.toFixed(2),
+      injuryStatus: injury ? injury.status : 'no-reported-injury', injurySource: injury ? injury.sourceUrl : null,
+      injuryUpdatedAt: injury ? injury.publishedAt : null, injuryEvidence: injury ? injury.evidence : null,
+      participation, rotationRisk, lowIceTime, canBuy, exclusionReasons,
       weekGames: weekTotal, weekGamesLeft: weekLeft, nextStart: nextStart(p.club),
       mu1: +mu1.toFixed(2), sigma1: +Math.sqrt(v1).toFixed(2),
       muH: +mu.toFixed(2), sigmaH: +Math.sqrt(v).toFixed(2),
@@ -207,7 +228,7 @@ function analyze(snap, userOpts = {}) {
 
   // candidates for buying: not locked, not in squad, priced
   const squadSet = new Set(squadIds);
-  const cands = pruneCands(players.filter((p) => !p.locked && !squadSet.has(p.id) && p.price > 0));
+  const cands = pruneCands(players.filter((p) => p.canBuy && !p.locked && !squadSet.has(p.id) && p.price > 0));
 
   // optimiser: best squad for each number of transfers (<= maxSwaps)
   const levels = beamOptimise({ squad, cands, budget, maxSwaps, clubLimit: o.clubLimit, width: o.beamWidth });
@@ -227,7 +248,9 @@ function analyze(snap, userOpts = {}) {
   const singles = singleSwaps({ squad, cands, budget, clubLimit: o.clubLimit });
 
   // ideal squad with no transfer limit
-  const ideal = idealSquad({ squad, players: pruneCands(players.filter((p) => p.price > 0 && (!p.locked || squadSet.has(p.id)))).concat(squad.filter((p) => !pruneCands(players).some((q) => q.id === p.id))), budget, clubLimit: o.clubLimit, mustKeep: squad.filter((p) => p.locked).map((p) => p.id) });
+  // Current players may be retained, including injured/locked players. They are not new buys.
+  const idealPool = new Map(pruneCands(players.filter((p) => p.canBuy && !p.locked && p.price > 0)).concat(squad).map((p) => [p.id, p]));
+  const ideal = idealSquad({ squad, players: [...idealPool.values()], budget, clubLimit: o.clubLimit, mustKeep: squad.filter((p) => p.locked).map((p) => p.id) });
 
   const league = leagueAnalysis({ snap, byId, players, squadIds, squad, options, ideal, o, budget, mulberry: mulberry32, maxSwaps });
 
@@ -235,6 +258,11 @@ function analyze(snap, userOpts = {}) {
   return {
     generatedAt: snap.generatedAt,
     computedAt: new Date(now).toISOString(),
+    health: { ...health, byId: undefined, excluded: players.filter((p) => !p.canBuy).length,
+      injured: players.filter((p) => p.injuryStatus === 'injured').length,
+      doubtful: players.filter((p) => p.injuryStatus === 'doubtful').length,
+      rotation: players.filter((p) => p.rotationRisk || p.lowIceTime).length,
+      minParticipation: o.minParticipation, minGoalieParticipation: o.minGoalieParticipation },
     params: { horizon: H, seasonWeeks: seasonExtra, gamesPerWeek: +gamesPerWeek.toFixed(2), risk: o.risk, maxSwaps, clubLimit: o.clubLimit, budget, lockBefore: o.lockBefore, lockAfter: o.lockAfter, priorK: K, matchBeta: o.matchBeta, discount: o.discount, beamWidth: o.beamWidth },
     week: { current: currentWeek + 1, start: new Date(wk[0]).toISOString(), end: new Date(wk[1]).toISOString(), deadline: meta.deadline, siteWeek: meta.week },
     team: {
@@ -250,7 +278,7 @@ function analyze(snap, userOpts = {}) {
     squadMissing,
     weeklyPlan: o.weeklyPlan ? buildWeeklyPlan({ players, squad, squadMissing, meta, budget, now,
       week: { current: currentWeek + 1, start: new Date(wk[0]).toISOString(), end: new Date(wk[1]).toISOString() },
-      generatedAt: snap.generatedAt, optimise: beamOptimise, prune: pruneCands, width: o.beamWidth }) : undefined,
+      health, generatedAt: snap.generatedAt, optimise: beamOptimise, prune: pruneCands, width: o.beamWidth }) : undefined,
     options,
     singles,
     ideal: ideal ? { value: +ideal.value.toFixed(2), cost: ideal.cost, transfersNeeded: squadIds.filter((id) => !ideal.ids.includes(id)).length, ids: ideal.ids, players: ideal.ids.map((id) => brief(byId.get(id))) } : null,
@@ -266,7 +294,7 @@ function analyze(snap, userOpts = {}) {
 
 function brief(p) {
   if (!p) return null;
-  return { id: p.id, name: p.name, club: p.club, pos: p.posShort, price: p.price, seasonPoints: p.seasonPoints, gp: p.gp, fppg: p.fppg, mu1: p.mu1, muH: p.muH, sigmaH: p.sigmaH, weekGames: p.weekGames, weekGamesLeft: p.weekGamesLeft, locked: p.locked };
+  return { id: p.id, name: p.name, club: p.club, pos: p.posShort, price: p.price, seasonPoints: p.seasonPoints, gp: p.gp, fppg: p.fppg, mu1: p.mu1, muH: p.muH, sigmaH: p.sigmaH, weekGames: p.weekGames, weekGamesLeft: p.weekGamesLeft, locked: p.locked, canBuy: p.canBuy, injuryStatus: p.injuryStatus, injurySource: p.injurySource, injuryUpdatedAt: p.injuryUpdatedAt, participation: p.participation, rotationRisk: p.rotationRisk, exclusionReasons: p.exclusionReasons };
 }
 
 // Keep a small, useful candidate set per position: best by score and best by score per rouble.
@@ -306,7 +334,7 @@ function beamOptimise({ squad, cands, budget, maxSwaps, clubLimit, width = 200 }
   const val0 = squad.reduce((s, p) => s + p.score, 0);
   const byPos = { 1: [], 2: [], 3: [] };
   const candById = new Map();
-  for (const c of cands) { if (originals.has(c.id)) continue; byPos[c.pos].push(c); candById.set(c.id, c); }
+  for (const c of cands) { if (originals.has(c.id) || c.canBuy === false) continue; byPos[c.pos].push(c); candById.set(c.id, c); }
   const root = { value: val0, cost: cost0, counts: counts0, sold: [], bought: [], ids: squad.map((p) => p.id), swaps: [] };
   const levels = [root];
   let beam = [root];
@@ -371,7 +399,7 @@ function singleSwaps({ squad, cands, budget, clubLimit }) {
     if (o.locked) continue;
     const list = [];
     for (const c of cands) {
-      if (c.pos !== o.pos || squadSet.has(c.id)) continue;
+      if (c.canBuy === false || c.pos !== o.pos || squadSet.has(c.id)) continue;
       if (cost0 - o.price + c.price > budget) continue;
       const cnt = (counts[c.club] || 0) - (o.club === c.club ? 1 : 0);
       if (cnt + 1 > clubLimit) continue;
@@ -388,7 +416,7 @@ function singleSwaps({ squad, cands, budget, clubLimit }) {
 function idealSquad({ squad, players, budget, clubLimit, mustKeep }) {
   const byId = new Map(players.map((p) => [p.id, p]));
   const byPos = { 1: [], 2: [], 3: [] };
-  for (const p of players) if (p.price > 0 && (!p.locked || mustKeep.includes(p.id))) byPos[p.pos].push(p);
+  for (const p of players) if (p.canBuy && p.price > 0 && !p.locked) byPos[p.pos].push(p);
   const evalIds = (ids) => {
     const ps = ids.map((i) => byId.get(i));
     if (ps.some((p) => !p)) return null;
@@ -425,7 +453,7 @@ function idealSquad({ squad, players, budget, clubLimit, mustKeep }) {
   const cnt = { 1: 0, 2: 0, 3: 0 }; const club = {}; let cost = 0; const seed = [];
   for (const id of mustKeep) { const p = byId.get(id); if (p) { seed.push(id); cnt[p.pos]++; club[p.club] = (club[p.club] || 0) + 1; cost += p.price; } }
   for (const p of order) {
-    if (seed.includes(p.id) || cnt[p.pos] >= NEED[p.pos]) continue;
+    if (!p.canBuy || p.locked || seed.includes(p.id) || cnt[p.pos] >= NEED[p.pos]) continue;
     if ((club[p.club] || 0) >= clubLimit || cost + p.price > budget) continue;
     seed.push(p.id); cnt[p.pos]++; club[p.club] = (club[p.club] || 0) + 1; cost += p.price;
   }
@@ -472,7 +500,7 @@ function leagueAnalysis({ snap, byId, players, squadIds, squad, options, ideal, 
   for (const r of [-1, -0.5, 0.5, 1]) {
     const scoreOf = (p) => p.muH - r * p.sigmaH;
     const sq = squad.map((p) => ({ ...p, score: scoreOf(p) }));
-    const cc = pruneCands(players.filter((p) => !p.locked && !squadIds.includes(p.id) && p.price > 0).map((p) => ({ ...p, score: scoreOf(p) })));
+    const cc = pruneCands(players.filter((p) => p.canBuy && !p.locked && !squadIds.includes(p.id) && p.price > 0).map((p) => ({ ...p, score: scoreOf(p) })));
     const levels = beamOptimise({ squad: sq, cands: cc, budget, maxSwaps, clubLimit: o.clubLimit, width: Math.min(o.beamWidth, 150) });
     const last = levels[levels.length - 1];
     if (last && last.swaps.length) cand.push({ label: `Риск ${r > 0 ? '+' : ''}${r}: ${r < 0 ? 'агрессивно' : 'осторожно'}`, ids: last.ids, swaps: last.swaps.map((s) => ({ out: s.out, in: s.in })), risk: r });
