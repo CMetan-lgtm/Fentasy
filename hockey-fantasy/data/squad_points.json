@@ -1,6 +1,6 @@
 {
-  "exportedAt": "2026-10-20T04:15:41.931Z",
-  "snapshotAt": "2026-10-20T04:15:41.331Z",
+  "exportedAt": "2026-10-20T04:51:32.927Z",
+  "snapshotAt": "2026-10-20T04:51:32.316Z",
   "team": {
     "teamId": "587717",
     "name": "Царь Леонидс",
@@ -10,7 +10,7 @@
     "transfersLeft": 0,
     "clubLimit": 3,
     "globalPlace": 1187,
-    "globalOf": 2876,
+    "globalOf": 2877,
     "leagues": [
       {
         "kind": "fan",
@@ -29,8 +29,8 @@
     ],
     "seasonPoints": 2807,
     "expectedThisWeek": 379.6,
-    "expectedHorizon": 379.6,
-    "sumScore": 566.96
+    "expectedHorizon": 591.6,
+    "sumScore": 830.6
   },
   "week": {
     "current": 7,
@@ -53,7 +53,7 @@
       "weekGames": 2,
       "weekGamesLeft": 1,
       "expectedThisWeek": 12.83,
-      "expectedHorizon": 12.83,
+      "expectedHorizon": 35.23,
       "locked": false,
       "nextStart": "2026-10-25T07:00:00.000Z"
     },
@@ -70,7 +70,7 @@
       "weekGames": 3,
       "weekGamesLeft": 2,
       "expectedThisWeek": 21.13,
-      "expectedHorizon": 21.13,
+      "expectedHorizon": 32.27,
       "locked": false,
       "nextStart": "2026-10-21T14:00:00.000Z"
     },
@@ -87,7 +87,7 @@
       "weekGames": 2,
       "weekGamesLeft": 2,
       "expectedThisWeek": 12.79,
-      "expectedHorizon": 12.79,
+      "expectedHorizon": 24.57,
       "locked": false,
       "nextStart": "2026-10-20T16:30:00.000Z"
     },
@@ -104,7 +104,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 31.76,
-      "expectedHorizon": 31.76,
+      "expectedHorizon": 41.71,
       "locked": false,
       "nextStart": "2026-10-21T16:30:00.000Z"
     },
@@ -121,7 +121,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 30.53,
-      "expectedHorizon": 30.53,
+      "expectedHorizon": 40.09,
       "locked": false,
       "nextStart": "2026-10-21T16:30:00.000Z"
     },
@@ -138,7 +138,7 @@
       "weekGames": 2,
       "weekGamesLeft": 2,
       "expectedThisWeek": 10.5,
-      "expectedHorizon": 10.5,
+      "expectedHorizon": 24.89,
       "locked": false,
       "nextStart": "2026-10-20T16:30:00.000Z"
     },
@@ -155,7 +155,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 19.26,
-      "expectedHorizon": 19.26,
+      "expectedHorizon": 24.88,
       "locked": false,
       "nextStart": "2026-10-20T16:30:00.000Z"
     },
@@ -172,7 +172,7 @@
       "weekGames": 2,
       "weekGamesLeft": 1,
       "expectedThisWeek": 9.03,
-      "expectedHorizon": 9.03,
+      "expectedHorizon": 32.97,
       "locked": false,
       "nextStart": "2026-10-21T09:30:00.000Z"
     },
@@ -189,7 +189,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 29.73,
-      "expectedHorizon": 29.73,
+      "expectedHorizon": 39.46,
       "locked": false,
       "nextStart": "2026-10-20T16:00:00.000Z"
     },
@@ -206,7 +206,7 @@
       "weekGames": 2,
       "weekGamesLeft": 2,
       "expectedThisWeek": 16.68,
-      "expectedHorizon": 16.68,
+      "expectedHorizon": 32.11,
       "locked": false,
       "nextStart": "2026-10-20T16:00:00.000Z"
     },
@@ -223,7 +223,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 26.18,
-      "expectedHorizon": 26.18,
+      "expectedHorizon": 33.82,
       "locked": false,
       "nextStart": "2026-10-20T16:30:00.000Z"
     },
@@ -240,7 +240,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 28.4,
-      "expectedHorizon": 28.4,
+      "expectedHorizon": 36.68,
       "locked": false,
       "nextStart": "2026-10-20T16:30:00.000Z"
     },
@@ -257,7 +257,7 @@
       "weekGames": 4,
       "weekGamesLeft": 3,
       "expectedThisWeek": 28.6,
-      "expectedHorizon": 28.6,
+      "expectedHorizon": 37.22,
       "locked": false,
       "nextStart": "2026-10-21T16:00:00.000Z"
     },
@@ -274,7 +274,7 @@
       "weekGames": 4,
       "weekGamesLeft": 3,
       "expectedThisWeek": 26.22,
-      "expectedHorizon": 26.22,
+      "expectedHorizon": 42.44,
       "locked": false,
       "nextStart": "2026-10-21T16:00:00.000Z"
     },
@@ -291,7 +291,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 24.44,
-      "expectedHorizon": 24.44,
+      "expectedHorizon": 38.82,
       "locked": false,
       "nextStart": "2026-10-21T16:30:00.000Z"
     },
@@ -308,7 +308,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 26.67,
-      "expectedHorizon": 26.67,
+      "expectedHorizon": 35.02,
       "locked": false,
       "nextStart": "2026-10-21T16:30:00.000Z"
     },
@@ -325,7 +325,7 @@
       "weekGames": 3,
       "weekGamesLeft": 3,
       "expectedThisWeek": 24.82,
-      "expectedHorizon": 24.82,
+      "expectedHorizon": 39.44,
       "locked": false,
       "nextStart": "2026-10-21T16:30:00.000Z"
     }
