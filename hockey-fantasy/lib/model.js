@@ -71,8 +71,10 @@ function statsOf(rec) {
 function joinStats(pool, statsSnap) {
   const byTag = new Map(Object.entries((statsSnap && statsSnap.byTag) || {}));
   const bySurname = new Map();
+  const nameKey = (name) => String(name || '').trim().split(/\s+/).pop().replace(/[.,]/g, '').toLocaleLowerCase('ru');
+  const clubKey = (club) => String(club || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru');
   for (const rec of byTag.values()) {
-    const key = String(rec.name || '').trim().split(/\s+/).pop().toLowerCase() + '|' + rec.team;
+    const key = nameKey(rec.name) + '|' + clubKey(rec.team);
     bySurname.set(key, (bySurname.get(key) || []).concat([rec]));
   }
   const out = new Map();
@@ -80,7 +82,10 @@ function joinStats(pool, statsSnap) {
   for (const p of pool) {
     let rec = byTag.get(p.tagId);
     if (!rec) {
-      const c = bySurname.get(String(p.name).trim().toLowerCase() + '|' + p.club);
+      // Fantasy names often contain initials (e.g. "Н. Нестеров"), while
+      // the stats feed returns a full given name. Match the surname only,
+      // and only when it is unique within the club.
+      const c = bySurname.get(nameKey(p.name) + '|' + clubKey(p.club));
       if (c && c.length === 1) { rec = c[0]; fallback++; }
     }
     out.set(p.id, statsOf(rec));
@@ -297,16 +302,43 @@ function brief(p) {
   return { id: p.id, name: p.name, club: p.club, pos: p.posShort, price: p.price, seasonPoints: p.seasonPoints, gp: p.gp, fppg: p.fppg, mu1: p.mu1, muH: p.muH, sigmaH: p.sigmaH, weekGames: p.weekGames, weekGamesLeft: p.weekGamesLeft, locked: p.locked, canBuy: p.canBuy, injuryStatus: p.injuryStatus, injurySource: p.injurySource, injuryUpdatedAt: p.injuryUpdatedAt, participation: p.participation, rotationRisk: p.rotationRisk, exclusionReasons: p.exclusionReasons };
 }
 
-// Keep a small, useful candidate set per position: best by score and best by score per rouble.
-function pruneCands(cands, keepTop = 60, keepRatio = 30) {
+// Keep a compact candidate set per position, but preserve alternatives for
+// club-limit and budget constraints. A pure top-score/top-price-ratio cut can
+// drop the best feasible player when the top names cluster in a few clubs or
+// prices.
+function pruneCands(cands, keepTop = 60, keepRatio = 30, keepByClub = 2, priceBands = 8, keepPerBand = 4) {
   const out = [];
   for (const pos of [1, 2, 3]) {
     const list = cands.filter((c) => c.pos === pos);
-    const byScore = [...list].sort((a, b) => b.score - a.score).slice(0, keepTop);
-    const byRatio = list.filter((c) => c.score > 0).sort((a, b) => (b.score / b.price) - (a.score / a.price)).slice(0, keepRatio);
-    const m = new Map();
-    for (const c of byScore.concat(byRatio)) m.set(c.id, c);
-    out.push(...m.values());
+    const byScore = [...list].sort((a, b) => b.score - a.score);
+    const byRatio = list.filter((c) => c.score > 0 && c.price > 0)
+      .sort((a, b) => (b.score / b.price) - (a.score / a.price));
+    const selected = new Map();
+    const add = (rows) => { for (const c of rows) selected.set(c.id, c); };
+    add(byScore.slice(0, keepTop));
+    add(byRatio.slice(0, keepRatio));
+
+    // Retain the best few names from every club so the club cap does not make
+    // the globally top-ranked set infeasible or unnecessarily weak.
+    const byClub = new Map();
+    for (const c of byScore) {
+      const club = String(c.club || '');
+      if (!byClub.has(club)) byClub.set(club, []);
+      byClub.get(club).push(c);
+    }
+    for (const rows of byClub.values()) add(rows.slice(0, keepByClub));
+
+    // Also keep strong candidates across the price distribution. This gives
+    // the budget-constrained search realistic lower-cost substitutions.
+    const byPrice = [...list].sort((a, b) => a.price - b.price || b.score - a.score);
+    for (let band = 0; band < priceBands; band++) {
+      const start = Math.floor(band * byPrice.length / priceBands);
+      const end = Math.floor((band + 1) * byPrice.length / priceBands);
+      const rows = byPrice.slice(start, end);
+      add([...rows].sort((a, b) => b.score - a.score).slice(0, keepPerBand));
+      add([...rows].sort((a, b) => a.price - b.price || b.score - a.score).slice(0, 2));
+    }
+    out.push(...selected.values());
   }
   return out;
 }
@@ -580,4 +612,4 @@ function toCsv(rows, columns) {
   return '\uFEFF' + [head, ...body].join('\r\n') + '\r\n';
 }
 
-module.exports = { analyze, toCsv, DEFAULTS, POS_NAME, POS_SHORT, NEED, weekIndex, WEEK_ANCHOR };
+module.exports = { analyze, toCsv, DEFAULTS, POS_NAME, POS_SHORT, NEED, weekIndex, WEEK_ANCHOR, joinStats, pruneCands };
