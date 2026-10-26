@@ -434,7 +434,7 @@
 
   function renderSingles(w) {
     const rows = w.singles || [];
-    const head = `<tr><th>Уходит</th><th>Приходит</th><th class="n">Цена (Δ)</th><th class="n">Игр на неделе: уходит → приходит</th><th class="n">Δ очков на неделю</th><th class="n">Δ до конца сезона (приблиз.)</th></tr>`;
+    const head = `<tr><th>Уходит</th><th>Приходит</th><th class="n">Цена (Δ)</th><th class="n">Игр на неделе: уходит → приходит</th><th class="n">Δ очков на неделю</th><th class="n">Δ до конца сезона (приблиз.)</th><th class="n">Вероятность улучшения</th></tr>`;
     const body = rows.map((r) => {
       const so = state.seasonMu.get(r.out.id), si = state.seasonMu.get(r.in.id);
       const dS = (so == null || si == null) ? null : si - so;
@@ -445,9 +445,10 @@
       <td class="n">${r.out.weekGamesLeft} → ${r.in.weekGamesLeft}</td>
       <td class="n ${r.dThisWeek >= 0 ? 'up' : 'down'}">${sgn(r.dThisWeek)}</td>
       <td class="n ${dS != null && dS >= 0 ? 'up' : 'down'}">${dS == null ? '—' : sgn(dS)}</td>
+      <td class="n">${Number.isFinite(r.probabilityBetter) ? `${Math.round(r.probabilityBetter * 100)}%` : '—'}</td>
     </tr>`;
     }).join('');
-    $('singlesTable').innerHTML = head + (body || `<tr><td colspan="6" class="muted">Подходящих одиночных замен нет (бюджет, клубы или блокировки).</td></tr>`);
+    $('singlesTable').innerHTML = head + (body || `<tr><td colspan="7" class="muted">Подходящих одиночных замен нет (бюджет, клубы или блокировки).</td></tr>`);
   }
 
   function optionRows(opts, w) {
