@@ -63,9 +63,12 @@ function saveHistory(snap, a) {
     fs.mkdirSync(dir, { recursive: true });
     const rec = {
       generatedAt: snap.generatedAt,
+      forecast: { horizon: a.params.horizon, seasonWeeks: a.params.seasonWeeks, targetAt: a.week.end, params: a.params },
       team: { cost: snap.meta.cost, balance: snap.meta.balance, value: snap.meta.cost + snap.meta.balance, transfersLeft: snap.meta.transfersLeft, week: snap.meta.week, globalPlace: snap.meta.globalPlace },
       league: a.league ? { leagueId: a.league.leagueId, ourPlace: a.league.ourPlace, ourValue: a.league.ourValue, leaderValue: a.league.leader && a.league.leader.value, top: a.league.top.map((r) => ({ place: r.place, teamId: r.teamId, value: r.value, tourPoints: r.tourPoints })) } : null,
-      squad: a.squad.map((p) => ({ id: p.id, price: p.price, seasonPoints: p.seasonPoints, mu1: p.mu1 })),
+      squad: a.squad.map((p) => ({ id: p.id, name: p.name, club: p.club, pos: p.posShort, price: p.price, seasonPoints: p.seasonPoints, mu1: p.mu1, muH: p.muH, sigmaH: p.sigmaH, availability: p.availability, participation: p.participation })),
+      poolForecast: a.players.map((p) => ({ id: p.id, name: p.name, club: p.club, pos: p.posShort, seasonPoints: p.seasonPoints, mu1: p.mu1, sigma1: p.sigma1, muH: p.muH, sigmaH: p.sigmaH, availability: p.availability, participation: p.participation })),
+      schedule: snap.schedule, standings: snap.standings,
     };
     fs.writeFileSync(path.join(dir, rec.generatedAt.replace(/[:.]/g, '-') + '.json'), JSON.stringify(rec));
   } catch (e) { /* history is optional */ }

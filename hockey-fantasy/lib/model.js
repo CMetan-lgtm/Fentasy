@@ -134,6 +134,24 @@ function analyze(snap, userOpts = {}) {
   // stats join and position priors (pooled over players with >= 5 games)
   const pool = snap.pool;
   const { map: statMap, fallback } = joinStats(pool, snap.stats);
+  // Empirical-Bayes prior for probability of appearing in a club game.
+  // Aggregate season appearances are the finest participation data currently
+  // provided by Sports.ru; this shrinks small samples without pretending to
+  // know the next goalie start or a recent lineup change.
+  const participationTotals = { 1: { played: 0, possible: 0 }, 2: { played: 0, possible: 0 }, 3: { played: 0, possible: 0 } };
+  for (const p of pool) {
+    const st = statMap.get(p.id); const possible = teamGames(p.club);
+    if (st && st.gp > 0 && possible > 0 && participationTotals[p.amplua]) {
+      participationTotals[p.amplua].played += Math.min(st.gp, possible);
+      participationTotals[p.amplua].possible += possible;
+    }
+  }
+  const participationPrior = {};
+  for (const pos of [1, 2, 3]) {
+    const x = participationTotals[pos];
+    participationPrior[pos] = x.possible ? x.played / x.possible : (pos === 1 ? 0.5 : 0.8);
+  }
+  const participationPriorStrength = 3;
   const acc = { 1: { n: 0, pts: 0, sv: 0, ga: 0, cs: 0 }, 2: { n: 0, pts: 0, g: 0, a: 0, pim: 0 }, 3: { n: 0, pts: 0, g: 0, a: 0, pim: 0 } };
   for (const p of pool) {
     const st = statMap.get(p.id);
@@ -172,7 +190,10 @@ function analyze(snap, userOpts = {}) {
     if (rotationRisk) exclusionReasons.push(`Риск ротации: участие в ${Math.round(participation * 100)}% матчей клуба`);
     if (lowIceTime) exclusionReasons.push('Мало среднего игрового времени');
     const canBuy = exclusionReasons.length === 0;
-    const avail = unavailable ? 0 : clamp((gp + 1) / (tp + 1.5), 0.1, 1.0);           // share of club games he plays
+    const posteriorAvail = clamp((gp + participationPriorStrength * participationPrior[p.amplua]) / (tp + participationPriorStrength), 0.05, 1);
+    const avail = injury && injury.status === 'injured' ? 0
+      : injury && injury.status === 'doubtful' ? posteriorAvail * 0.35
+        : posteriorAvail;
     let sigma2Game;
     if (p.amplua === 1) {
       const sv = ((st ? st.saves : 0) + K * pr.sv) / (gp + K);
@@ -236,7 +257,8 @@ function analyze(snap, userOpts = {}) {
   const cands = pruneCands(players.filter((p) => p.canBuy && !p.locked && !squadSet.has(p.id) && p.price > 0));
 
   // optimiser: best squad for each number of transfers (<= maxSwaps)
-  const levels = beamOptimise({ squad, cands, budget, maxSwaps, clubLimit: o.clubLimit, width: o.beamWidth });
+  const optimiser = cands.length <= 20 && maxSwaps <= 2 ? exactOptimise : beamOptimise;
+  const levels = optimiser({ squad, cands, budget, maxSwaps, clubLimit: o.clubLimit, width: o.beamWidth });
   const options = levels.map((lv, k) => ({
     transferLimit: k,
     transfers: lv.swaps.length,
@@ -343,6 +365,47 @@ function pruneCands(cands, keepTop = 60, keepRatio = 30, keepByClub = 2, priceBa
   return out;
 }
 
+// Exact enumerator for small candidate sets. Production uses this path only for
+// at most two swaps and <=20 incoming candidates; larger problems use beam search.
+function exactOptimise({ squad, cands, budget, maxSwaps, clubLimit }) {
+  const originals = new Map(squad.map((p) => [p.id, p]));
+  const byId = new Map(cands.map((p) => [p.id, p]));
+  const counts0 = {};
+  for (const p of squad) counts0[p.club] = (counts0[p.club] || 0) + 1;
+  const root = { value: squad.reduce((s, p) => s + p.score, 0), cost: squad.reduce((s, p) => s + p.price, 0), counts: counts0, sold: [], bought: [], ids: squad.map((p) => p.id), swaps: [] };
+  const best = [root];
+  let states = [root];
+  for (let k = 1; k <= maxSwaps; k++) {
+    const nextByKey = new Map();
+    for (const state of states) for (const out of squad) {
+      if (out.locked || state.sold.includes(out.id)) continue;
+      for (const inn of cands) {
+        if (inn.canBuy === false || inn.pos !== out.pos || state.bought.includes(inn.id)) continue;
+        const cost = state.cost - out.price + inn.price;
+        if (cost > budget) continue;
+        const clubCount = (state.counts[inn.club] || 0) - (inn.club === out.club ? 1 : 0);
+        if (clubCount + 1 > clubLimit) continue;
+        const sold = [...state.sold, out.id].sort(); const bought = [...state.bought, inn.id].sort();
+        const key = `${sold.join(',')}|${bought.join(',')}`;
+        if (nextByKey.has(key)) continue;
+        const counts = { ...state.counts };
+        counts[out.club] = (counts[out.club] || 0) - 1; counts[inn.club] = (counts[inn.club] || 0) + 1;
+        nextByKey.set(key, { key, value: state.value - out.score + inn.score, cost, counts, sold, bought,
+          ids: state.ids.filter((id) => id !== out.id).concat(inn.id), swaps: state.swaps.concat([{ out: out.id, in: inn.id }]) });
+      }
+    }
+    const next = [...nextByKey.values()];
+    if (!next.length) break;
+    next.sort((a, b) => b.value - a.value);
+    best[k] = next[0]; states = next;
+  }
+  let prefix = root;
+  return Array.from({ length: maxSwaps + 1 }, (_, k) => {
+    if (best[k] && best[k].value > prefix.value) prefix = best[k];
+    return prefix;
+  });
+}
+
 // indices of the M largest values (binary min-heap, O(n log M))
 function topIndices(vals, M) {
   const heap = new Int32Array(M);
@@ -421,6 +484,15 @@ function beamOptimise({ squad, cands, budget, maxSwaps, clubLimit, width = 200 }
   return out;
 }
 
+// Normal approximation for P(new player outscores the outgoing player over the
+// selected horizon. This is an uncertainty indicator, not a calibrated guarantee.
+function normalCdf(x) {
+  const z = Math.abs(x) / Math.sqrt(2);
+  const t = 1 / (1 + 0.3275911 * z);
+  const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z);
+  return 0.5 * (1 + Math.sign(x) * erf);
+}
+
 function singleSwaps({ squad, cands, budget, clubLimit }) {
   const squadSet = new Set(squad.map((p) => p.id));
   const cost0 = squad.reduce((s, p) => s + p.price, 0);
@@ -438,7 +510,13 @@ function singleSwaps({ squad, cands, budget, clubLimit }) {
       list.push({ o, c, d: c.score - o.score });
     }
     list.sort((a, b) => b.d - a.d);
-    for (const x of list.slice(0, 3)) rows.push({ out: brief(x.o), in: brief(x.c), dScore: +x.d.toFixed(2), dPrice: x.c.price - x.o.price, dThisWeek: +(x.c.mu1 - x.o.mu1).toFixed(2), dHorizon: +(x.c.muH - x.o.muH).toFixed(2) });
+    for (const x of list.slice(0, 3)) {
+      const delta = x.c.muH - x.o.muH;
+      const deltaSd = Math.hypot(x.c.sigmaH || 0, x.o.sigmaH || 0);
+      rows.push({ out: brief(x.o), in: brief(x.c), dScore: +x.d.toFixed(2), dPrice: x.c.price - x.o.price, dThisWeek: +(x.c.mu1 - x.o.mu1).toFixed(2), dHorizon: +delta.toFixed(2),
+        probabilityBetter: +normalCdf(deltaSd > 0 ? delta / deltaSd : (delta > 0 ? 8 : delta < 0 ? -8 : 0)).toFixed(3),
+        probabilityMethod: 'normal-approximation-independent-player-uncertainty' });
+    }
   }
   rows.sort((a, b) => b.dScore - a.dScore);
   return rows.slice(0, 25);
@@ -612,4 +690,4 @@ function toCsv(rows, columns) {
   return '\uFEFF' + [head, ...body].join('\r\n') + '\r\n';
 }
 
-module.exports = { analyze, toCsv, DEFAULTS, POS_NAME, POS_SHORT, NEED, weekIndex, WEEK_ANCHOR, joinStats, pruneCands };
+module.exports = { analyze, toCsv, DEFAULTS, POS_NAME, POS_SHORT, NEED, weekIndex, WEEK_ANCHOR, joinStats, pruneCands, exactOptimise };
